@@ -386,6 +386,24 @@ linux*)
     AC_CHECK_HEADERS([linux/fs.h])
 esac
 
+dnl Check for copy_file_range(2) support (FreeBSD 13+)
+case $host_os in
+freebsd*)
+    AC_CHECK_FUNCS(copy_file_range)
+esac
+
+dnl Check for reflink(3C) support (Solaris 11.3+)
+case $host_os in
+solaris*)
+    AC_CHECK_FUNCS(reflink)
+esac
+
+dnl Check for clonefile(2) support (macOS 10.12+)
+case $host_os in
+darwin*)
+    AC_CHECK_HEADERS([sys/clonefile.h])
+esac
+
 dnl Check if the OS is supported by the console saver.
 cons_saver=""
 case $host_os in
