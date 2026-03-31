@@ -53,6 +53,8 @@
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
+#elif defined(__FreeBSD__)
+#include <unistd.h>  // COPY_FILE_RANGE_CLONE
 #endif
 
 #include "lib/global.h"
@@ -720,7 +722,7 @@ vfs_preallocate (int dest_vfs_fd, off_t src_fsize, off_t dest_fsize)
 int
 vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 {
-#ifdef FICLONE
+#if defined(FICLONE) || defined(COPY_FILE_RANGE_CLONE)
     void *dest_fd = NULL;
     void *src_fd = NULL;
     struct vfs_class *dest_class;
@@ -750,7 +752,22 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
         return (-1);
     }
 
+#if defined(FICLONE)
     return ioctl (*(int *) dest_fd, FICLONE, *(int *) src_fd);
+#elif defined(COPY_FILE_RANGE_CLONE)
+    {
+        off_t in_offset = 0, out_offset = 0;
+        ssize_t result;
+        do
+        {
+            result = copy_file_range (*(int *) src_fd, &in_offset, *(int *) dest_fd, &out_offset,
+                                      SSIZE_MAX, COPY_FILE_RANGE_CLONE);
+        }
+        while (result > 0);
+        return result;
+    }
+#endif
+
 #else
     (void) dest_vfs_fd;
     (void) src_vfs_fd;
