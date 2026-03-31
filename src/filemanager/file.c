@@ -59,6 +59,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef HAVE_SYS_IOCTL_H
+#include <sys/ioctl.h>  // FICLONE
+#endif
 
 #include "lib/global.h"
 #include "lib/tty/tty.h"
@@ -2590,6 +2593,29 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
     src_gid = src_stat.st_gid;
     file_size = src_stat.st_size;
 
+#if defined(__APPLE__) || defined(__sun)
+    // On macOS 10.12+ and Solaris 11.4+, the syscalls for file cloning respond for creation of the
+    // destination file, so try them before mc_open to avoid handling various races later.
+    // Full file cloning is not supported in append and reget modes.
+    if (!(dst_exists && ctx->do_append))
+    {
+        // Destination file must not exist before the cloning syscall
+        if (dst_exists)
+        {
+            if (!try_remove_file (ctx, dst_vpath, &return_status))
+                goto ret;
+            dst_exists = FALSE;
+        }
+        // Passing preserve_uidgid to the syscall to reduce racing
+        if (vfs_clone_file_by_path (dst_vpath, src_vpath, ctx->preserve_uidgid) == 0)
+        {
+            dst_status = DEST_FULL;
+            return_status = FILE_CONT;
+            goto ret;
+        }
+    }
+#endif
+
     open_flags = O_WRONLY;
     if (!dst_exists)
         open_flags |= O_CREAT | O_EXCL;
@@ -2624,13 +2650,15 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
     appending = ctx->do_append;
     ctx->do_append = FALSE;
 
-    // Try clone the file first.
-    if (vfs_clone_file (dest_desc, src_desc) == 0)
+#if defined(FICLONE) || defined(HAVE_COPY_FILE_RANGE)
+    // Try clone the file first. It's not supported in append mode
+    if (!appending && vfs_clone_file (dest_desc, src_desc) == 0)
     {
         dst_status = DEST_FULL;
         return_status = FILE_CONT;
         goto ret;
     }
+#endif
 
     // Find out the optimal buffer size.
     while (mc_fstat (dest_desc, &dst_stat) != 0)

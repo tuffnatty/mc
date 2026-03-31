@@ -53,6 +53,12 @@
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
+#elif defined(__FreeBSD__) && defined(HAVE_COPY_FILE_RANGE)
+#include <unistd.h>  // COPY_FILE_RANGE_CLONE
+#elif defined(__APPLE__) && defined(HAVE_SYS_CLONEFILE_H)
+#include <sys/clonefile.h>  // CLONE_NOOWNERCOPY
+#elif defined(__sun) && defined(HAVE_REFLINK)
+#include <unistd.h>  // reflink()
 #endif
 
 #include "lib/global.h"
@@ -720,7 +726,7 @@ vfs_preallocate (int dest_vfs_fd, off_t src_fsize, off_t dest_fsize)
 int
 vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 {
-#ifdef FICLONE
+#if defined(FICLONE) || defined(COPY_FILE_RANGE_CLONE)
     void *dest_fd = NULL;
     void *src_fd = NULL;
     struct vfs_class *dest_class;
@@ -750,10 +756,62 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
         return (-1);
     }
 
+#if defined(FICLONE)
     return ioctl (*(int *) dest_fd, FICLONE, *(int *) src_fd);
+#elif defined(COPY_FILE_RANGE_CLONE)
+    {
+        off_t in_offset = 0, out_offset = 0;
+        ssize_t result;
+        do
+        {
+            result = copy_file_range (*(int *) src_fd, &in_offset, *(int *) dest_fd, &out_offset,
+                                      SSIZE_MAX, COPY_FILE_RANGE_CLONE);
+        }
+        while (result > 0);
+        return result;
+    }
+#endif
+
 #else
     (void) dest_vfs_fd;
     (void) src_vfs_fd;
+    errno = ENOTSUP;
+    return (-1);
+#endif
+}
+
+/* --------------------------------------------------------------------------------------------- */
+
+int
+vfs_clone_file_by_path (const vfs_path_t *dest_vpath, const vfs_path_t *src_vpath,
+                        gboolean preserve_uidgid)
+{
+#if defined(HAVE_SYS_CLONEFILE_H) || defined(HAVE_REFLINK)
+    const char *src_path;
+    const char *dest_path;
+
+    if (!vfs_file_is_local (dest_vpath) || !vfs_file_is_local (src_vpath))
+    {
+        errno = ENOTSUP;
+        return (-1);
+    }
+
+    src_path = vfs_path_get_last_path_str (src_vpath);
+    dest_path = vfs_path_get_last_path_str (dest_vpath);
+
+#if defined(HAVE_SYS_CLONEFILE_H)
+#ifndef CLONE_NOOWNERCOPY  // macOS 10.13+
+#define CLONE_NOOWNERCOPY 0
+#endif
+    return my_clonefile (src_path, dest_path, preserve_uidgid ? 0 : CLONE_NOOWNERCOPY);
+#elif defined(HAVE_REFLINK)
+    return reflink (src_path, dest_path, preserve_uidgid);
+#endif
+
+#else
+    (void) dest_vpath;
+    (void) src_vpath;
+    (void) preserve_uidgid;
     errno = ENOTSUP;
     return (-1);
 #endif
