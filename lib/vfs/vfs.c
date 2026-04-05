@@ -47,7 +47,7 @@
 #include <stdlib.h>
 
 #ifdef HAVE_FICLONERANGE
-#include <linux/fs.h>  // FICLONERANGE
+#include <linux/fs.h>   // FICLONERANGE
 #include <sys/ioctl.h>  // ioctl()
 #elif defined(HAVE_COPY_FILE_RANGE)
 #include <unistd.h>  // COPY_FILE_RANGE_CLONE
@@ -762,10 +762,10 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 
 #if defined(FICLONERANGE)
     {
-        struct file_clone_range fcr = {.src_fd = *(int *) src_fd,
-                                       .src_offset = in_offset,
-                                       .src_length = 0,
-                                       .dest_offset = out_offset};
+        struct file_clone_range fcr = { .src_fd = *(int *) src_fd,
+                                        .src_offset = in_offset,
+                                        .src_length = 0,
+                                        .dest_offset = out_offset };
 
         return ioctl (*(int *) dest_fd, FICLONERANGE, &fcr);
     }
