@@ -109,6 +109,7 @@ mc_global_t mc_global =
     {
         .cd_symlinks = TRUE,
         .preallocate_space = FALSE,
+        .file_cloning = FALSE
     }
 
 };
