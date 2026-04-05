@@ -385,11 +385,11 @@ case $host_os in
 linux*)
     AC_CHECK_HEADERS([linux/fs.h])
     AC_MSG_CHECKING([for FICLONERANGE])
-    AC_EGREP_CPP([FICLONERANGE],
+    AC_EGREP_CPP([FICLONERANGE_IS_DEFINED],
         [
             #include <linux/fs.h>
             #ifdef FICLONERANGE
-            FICLONERANGE
+            FICLONERANGE_IS_DEFINED
             #endif
         ],
         [
