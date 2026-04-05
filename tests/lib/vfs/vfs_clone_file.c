@@ -30,14 +30,14 @@
 #include <stdarg.h>
 #include <stdlib.h>
 
-#ifdef __linux__
-#include <linux/fs.h>   // FICLONE
+#ifdef HAVE_FICLONERANGE
+#include <linux/fs.h>   // FICLONERANGE
 #include <sys/ioctl.h>  // ioctl()
-#elif defined(__FreeBSD__) && defined(HAVE_COPY_FILE_RANGE)
+#elif defined(HAVE_COPY_FILE_RANGE)
 #include <unistd.h>  // copy_file_range()
-#elif defined(__sun) && defined(HAVE_REFLINK)
+#elif defined(HAVE_REFLINK)
 #include <unistd.h>  // reflink()
-#elif defined(__APPLE__) && defined(HAVE_SYS_CLONEFILE_H)
+#elif defined(HAVE_SYS_CLONEFILE_H)
 #include <sys/clonefile.h>  // clonefile()
 #endif
 
@@ -53,7 +53,7 @@ static gboolean clone_syscall__call_arguments_are_proper = FALSE;
 static const char test_filename1[] = "mctestclone1.tst";
 static const char test_filename2[] = "mctestclone2.tst";
 
-#ifdef __FreeBSD__
+#ifdef HAVE_COPY_FILE_RANGE
 /* @Mock */
 ssize_t
 copy_file_range (int infd, off_t *inoffp, int outfd, off_t *outoffp, size_t len, unsigned int flags)
@@ -71,7 +71,7 @@ copy_file_range (int infd, off_t *inoffp, int outfd, off_t *outoffp, size_t len,
 }
 #endif
 
-#ifdef __linux__
+#ifdef HAVE_FICLONERANGE
 #ifdef __GLIBC__
 /* @Mock */
 int
@@ -85,12 +85,12 @@ ioctl (int fd, int request, ...)
     (void) fd;
 
     clone_syscall__call_count++;
-    clone_syscall__call_arguments_are_proper = (request == FICLONE);
+    clone_syscall__call_arguments_are_proper = (request == FICLONERANGE);
     return -1;
 }
 #endif
 
-#if defined(HAVE_SYS_CLONEFILE_H)
+#ifdef HAVE_SYS_CLONEFILE_H
 /* @Mock */
 int
 my_clonefile (const char *src, const char *dst, uint32_t flags)
@@ -104,7 +104,7 @@ my_clonefile (const char *src, const char *dst, uint32_t flags)
 }
 #endif
 
-#if defined(HAVE_REFLINK)
+#ifdef HAVE_REFLINK
 /* @Mock */
 int
 reflink (const char *src, const char *dst, int preserve)
@@ -182,7 +182,7 @@ START_TEST (test_vfs_clone_file)
     vfs_clone_file (fdout, fdin);
 
     // then
-#if defined(FICLONE) || defined(HAVE_COPY_FILE_RANGE)
+#if defined(HAVE_FICLONERANGE) || defined(HAVE_COPY_FILE_RANGE)
     ck_assert (clone_syscall__call_count > 0);
     ck_assert (clone_syscall__call_arguments_are_proper);
 #else

@@ -380,10 +380,25 @@ case $host_os in
     AC_DEFINE([PTY_ZEROREAD], [1], [read(1) can return 0 for a non-closed fd])
 esac
 
-dnl Check linux/fs.h for FICLONE to support BTRFS's file clone operation
+dnl Check linux/fs.h for FICLONERANGE to support file clone operation
 case $host_os in
 linux*)
     AC_CHECK_HEADERS([linux/fs.h])
+    AC_MSG_CHECKING([for FICLONERANGE])
+    AC_EGREP_CPP([FICLONERANGE],
+        [
+            #include <linux/fs.h>
+            #ifdef FICLONERANGE
+            FICLONERANGE
+            #endif
+        ],
+        [
+            AC_DEFINE(HAVE_FICLONERANGE, 1, [Define if FICLONERANGE is supported on Linux])
+            AC_MSG_RESULT(yes)
+        ],
+        [
+            AC_MSG_RESULT(no)
+        ])
 esac
 
 dnl Check for copy_file_range(2) support (FreeBSD 13+)

@@ -46,18 +46,14 @@
 #include <errno.h>
 #include <stdlib.h>
 
-#ifdef __linux__
-#ifdef HAVE_LINUX_FS_H
-#include <linux/fs.h>
-#endif
-#ifdef HAVE_SYS_IOCTL_H
-#include <sys/ioctl.h>
-#endif
-#elif defined(__FreeBSD__) && defined(HAVE_COPY_FILE_RANGE)
+#ifdef HAVE_FICLONERANGE
+#include <linux/fs.h>  // FICLONERANGE
+#include <sys/ioctl.h>  // ioctl()
+#elif defined(HAVE_COPY_FILE_RANGE)
 #include <unistd.h>  // COPY_FILE_RANGE_CLONE
-#elif defined(__APPLE__) && defined(HAVE_SYS_CLONEFILE_H)
+#elif defined(HAVE_SYS_CLONEFILE_H)
 #include <sys/clonefile.h>  // CLONE_NOOWNERCOPY
-#elif defined(__sun) && defined(HAVE_REFLINK)
+#elif defined(HAVE_REFLINK)
 #include <unistd.h>  // reflink()
 #endif
 
@@ -726,11 +722,12 @@ vfs_preallocate (int dest_vfs_fd, off_t src_fsize, off_t dest_fsize)
 int
 vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 {
-#if defined(FICLONE) || defined(COPY_FILE_RANGE_CLONE)
+#if defined(FICLONERANGE) || defined(COPY_FILE_RANGE_CLONE)
     void *dest_fd = NULL;
     void *src_fd = NULL;
     struct vfs_class *dest_class;
     struct vfs_class *src_class;
+    off_t in_offset, out_offset;
 
     dest_class = vfs_class_find_by_handle (dest_vfs_fd, &dest_fd);
     if ((dest_class->flags & VFSF_LOCAL) == 0)
@@ -756,12 +753,26 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
         return (-1);
     }
 
-#if defined(FICLONE)
-    return ioctl (*(int *) dest_fd, FICLONE, *(int *) src_fd);
+    in_offset = mc_lseek (src_vfs_fd, 0, SEEK_CUR);
+    if (in_offset < 0)
+        return (-1);
+    out_offset = mc_lseek (dest_vfs_fd, 0, SEEK_CUR);
+    if (out_offset < 0)
+        return (-1);
+
+#if defined(FICLONERANGE)
+    {
+        struct file_clone_range fcr = {.src_fd = *(int *) src_fd,
+                                       .src_offset = in_offset,
+                                       .src_length = 0,
+                                       .dest_offset = out_offset};
+
+        return ioctl (*(int *) dest_fd, FICLONERANGE, &fcr);
+    }
 #elif defined(COPY_FILE_RANGE_CLONE)
     {
-        off_t in_offset = 0, out_offset = 0;
         ssize_t result;
+
         do
         {
             result = copy_file_range (*(int *) src_fd, &in_offset, *(int *) dest_fd, &out_offset,
