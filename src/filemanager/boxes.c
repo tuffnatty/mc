@@ -634,7 +634,8 @@ configure_box (void)
         quick_widgets[6].state = WST_DISABLED;
 #endif
 
-#if !defined(FICLONE) && !defined(HAVE_COPY_FILE_RANGE) && !defined(HAVE_SYS_CLONEFILE_H) && !defined(HAVE_REFLINK)
+#if !defined(FICLONE) && !defined(HAVE_COPY_FILE_RANGE) \
+    && !defined(HAVE_SYS_CLONEFILE_H) && !defined(HAVE_REFLINK)
         mc_global.vfs.file_cloning = FALSE;
         quick_widgets[7].state = WST_DISABLED;
 #endif
