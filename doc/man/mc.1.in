@@ -1070,6 +1070,10 @@ the tagged files, if there is at least one file tagged) to the
 directory/filename you specify in the input dialog. The destination
 defaults to the directory in the non\-selected panel. Space for destination
 file may be preallocated relative to preallocate_space configure option.
+If
+.I Use COW file cloning
+is enabled (default setting), Midnight Commander attempts to use copy\-on\-write
+data cloning on supported local filesystems.
 During this process, you can press C\-c or Esc to abort the operation.
 For details about source mask (which will be usually either * or ^\e(.*\e)$
 depending on setting of Use shell patterns) and possible wildcards in the
@@ -1754,6 +1758,11 @@ Disabled by default.
 .I Preallocate space.
 Preallocate space for whole target file, if possible, before copy operation.
 Disabled by default.
+.PP
+.I Use COW file cloning.
+Attempt to use copy\-on\-write data cloning on supported local filesystems during
+copy and move operations.
+Enabled by default.
 .PP
 .B Esc key mode.
 .PP

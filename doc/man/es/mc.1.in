@@ -1121,6 +1121,11 @@ los archivos marcados, si hay al menos uno marcado) al directorio especificado
 por el usuario en la ventana.
 El espacio para el archivo de destino puede preasignarse en relación con la
 opción de configuración preallocate_space.
+Si la opción
+.I Usar clonación de archivos COW
+está habilitada (configuración predeterminada), Midnight Commander intenta usar
+la clonación de datos mediante copia en escritura en los sistemas de archivos
+locales compatibles.
 Durante este proceso, podemos pulsar
 .IR Ctrl\-c " o " Esc
 para anular la operación. Para más detalles sobre la máscara de origen
@@ -1753,6 +1758,11 @@ directorio actual en el panbel activo. Está deshabilitado por defecto.
 .I Reservar Espacio.
 Antes de comenzar una copia reserva espacio para el archivo destino
 completo. Por defecto está desactivado.
+.PP
+.I Usar clonación de archivos COW.
+Intentar utilizar la clonación de datos copy\-on\-write en sistemas de archivos
+locales compatibles durante las operaciones de copia y movimiento.
+Por defecto, está activa.
 .PP
 .B Tecla de Escape.
 .PP
