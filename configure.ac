@@ -403,6 +403,7 @@ linux*)                                          # FICLONERANGE (Linux 4.5+)
         [
             AC_MSG_RESULT(no)
         ])
+    AC_CHECK_FUNCS(copy_file_range)  # copy_file_range(2) (Linux)
     ;;
 esac
 
