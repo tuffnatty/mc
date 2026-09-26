@@ -49,12 +49,25 @@
 #ifdef HAVE_FICLONERANGE
 #include <linux/fs.h>   // FICLONERANGE
 #include <sys/ioctl.h>  // ioctl()
-#elif defined(HAVE_COPY_FILE_RANGE)
-#include <unistd.h>  // COPY_FILE_RANGE_CLONE
+#endif
+
+#if defined(HAVE_COPY_FILE_RANGE)
+
+#define _FILE_OFFSET_BITS 64
+#include <unistd.h>  // copy_file_range(), COPY_FILE_RANGE_CLONE
+#if !defined(COPY_FILE_RANGE_CLONE)
+#define COPY_FILE_RANGE_CLONE 0  // shim for Linux
+#include <sys/utsname.h>         // uname()
+#endif
+
 #elif defined(HAVE_SYS_CLONEFILE_H)
+
 #include <sys/clonefile.h>  // CLONE_NOOWNERCOPY
+
 #elif defined(HAVE_REFLINK)
+
 #include <unistd.h>  // reflink()
+
 #endif
 
 #include "lib/global.h"
@@ -209,6 +222,25 @@ vfs_test_current_dir (const vfs_path_t *vpath)
             && mc_stat (vfs_get_raw_current_dir (), &my_stat2) == 0
             && my_stat.st_ino == my_stat2.st_ino && my_stat.st_dev == my_stat2.st_dev);
 }
+
+#ifdef HAVE_COPY_FILE_RANGE
+/* Return true if copy_file_range(2) works well.  This is false on Linux kernels before 5.19. */
+static gboolean
+_vfs_copy_file_range_works (void)
+{
+#if !defined(__linux__)
+    return TRUE;
+#else
+    static int copy_file_range_works_cache = -1;
+    struct utsname name;
+
+    if (copy_file_range_works_cache < 0)
+        copy_file_range_works_cache =
+            uname (&name) == 0 && 0 <= str_verscmp (name.release, "5.19.0");
+    return (gboolean) copy_file_range_works_cache;
+#endif
+}
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /*** public functions ****************************************************************************/
@@ -762,6 +794,7 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 
 #if defined(FICLONERANGE)
     {
+        int rc;
         struct file_clone_range fcr = {
             .src_fd = *(int *) src_fd,
             .src_offset = in_offset,
@@ -769,11 +802,21 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
             .dest_offset = out_offset,
         };
 
-        return ioctl (*(int *) dest_fd, FICLONERANGE, &fcr);
+        rc = ioctl (*(int *) dest_fd, FICLONERANGE, &fcr);
+#if defined(HAVE_COPY_FILE_RANGE)
+        if (rc != -1)
+#endif
+            return rc;
+        /* Proceed with copy_file_range() */
     }
-#elif defined(COPY_FILE_RANGE_CLONE)
+#endif
+
+#if defined(HAVE_COPY_FILE_RANGE)
     {
         ssize_t result;
+
+        if (!_vfs_copy_file_range_works ())
+            return -1;
 
         do
         {
