@@ -879,7 +879,13 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 gboolean
 vfs_cloning_supported (vfs_path_t *src_vpath, vfs_path_t *dst_vpath)
 {
-    return vfs_file_is_local (src_vpath) && vfs_file_is_local (dst_vpath);
+    if (!vfs_file_is_local (src_vpath))
+        return FALSE;
+    if (vfs_file_is_local (dst_vpath))
+        return TRUE;
+    if ((vfs_file_class_flags (dst_vpath) & VFSF_USETMP) != 0)
+        return TRUE;
+    return FALSE;
 }
 
 /* --------------------------------------------------------------------------------------------- */

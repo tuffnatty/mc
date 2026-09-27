@@ -66,6 +66,7 @@
 #include "lib/search.h"
 #include "lib/strutil.h"
 #include "lib/util.h"
+#include "lib/vfs/xdirentry.h"
 #include "lib/vfs/vfs.h"
 #include "lib/vfs/utilvfs.h"
 #include "lib/widget.h"
@@ -2756,28 +2757,37 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
 
         off_t src_offset = ctx->do_reget;
         off_t dst_offset = ctx->do_reget;
-        void *local_src_fd = NULL;
-        void *local_dst_fd = NULL;
+
+        int local_src_fd = -1;
+        int local_dst_fd = -1;
 
         // Try to clone the initial chunk to choose a working copy_method
         while (mc_global.vfs.file_cloning && vfs_cloning_supported (src_vpath, dst_vpath))
         {
+            void *src_fsinfo = NULL;
+            void *dst_fsinfo = NULL;
+
+            // Obtain the source fd. The source is always local.
+            vfs_class_find_by_handle (src_desc, &src_fsinfo);
+            local_src_fd = *(int *) src_fsinfo;
+            // Obtain the destination fd. The destination is either local or VFSF_USETMP.
+            vfs_class_find_by_handle (dest_desc, &dst_fsinfo);
+            local_dst_fd = vfs_file_is_local (dst_vpath) ? *(int *) dst_fsinfo
+                                                         : VFS_FILE_HANDLER (dst_fsinfo)->handle;
+
             bufsize = 1 << 20;
             if ((off_t) bufsize > file_size - src_offset)
                 bufsize = SSIZE_MAX;  // don't try to read behind EOF
-            vfs_class_find_by_handle (src_desc, &local_src_fd);
-            vfs_class_find_by_handle (dest_desc, &local_dst_fd);
+
 #ifdef HAVE_FICLONERANGE
             copy_method = mc_copy_file_range_ficlonerange;
-            n_copied = copy_method (*(int *) local_src_fd, &src_offset, *(int *) local_dst_fd,
-                                    &dst_offset, bufsize);
+            n_copied = copy_method (local_src_fd, &src_offset, local_dst_fd, &dst_offset, bufsize);
             if (n_copied >= 0)
                 break;
 #endif
 #ifdef HAVE_COPY_FILE_RANGE
             copy_method = mc_copy_file_range_native;
-            n_copied = copy_method (*(int *) local_src_fd, &src_offset, *(int *) local_dst_fd,
-                                    &dst_offset, bufsize);
+            n_copied = copy_method (local_src_fd, &src_offset, local_dst_fd, &dst_offset, bufsize);
 #endif
             if (n_copied < 0)
                 copy_method = NULL;
@@ -2813,8 +2823,8 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
 
                 if ((off_t) bufsize > n_rest)
                     bufsize = SSIZE_MAX;  // don't try to read behind EOF
-                n_copied = copy_method (*(int *) local_src_fd, &src_offset, *(int *) local_dst_fd,
-                                        &dst_offset, bufsize);
+                n_copied =
+                    copy_method (local_src_fd, &src_offset, local_dst_fd, &dst_offset, bufsize);
                 if (n_copied < 0)
                 {
                     return_status = ctx->ignore_all
