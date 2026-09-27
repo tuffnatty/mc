@@ -751,6 +751,53 @@ vfs_preallocate (int dest_vfs_fd, off_t src_fsize, off_t dest_fsize)
 
 /* --------------------------------------------------------------------------------------------- */
 
+#if defined(FICLONERANGE)
+ssize_t
+mc_copy_file_range_ficlonerange (int src_fd, off_t *src_offset, int dest_fd, off_t *dest_offset,
+                                 size_t len)
+{
+    int rc;
+    struct file_clone_range fcr = {
+        .src_fd = src_fd,
+        .src_offset = *src_offset,
+        .src_length = (len == SSIZE_MAX) ? 0 : len,
+        .dest_offset = *dest_offset,
+    };
+
+    rc = ioctl (dest_fd, FICLONERANGE, &fcr);
+    if (rc == -1)
+        return rc;
+
+    if (len == SSIZE_MAX)
+    {
+        *src_offset = lseek (src_fd, 0, SEEK_END);
+        *dest_offset = lseek (dest_fd, 0, SEEK_END);
+    }
+    else
+    {
+        *src_offset += len;
+        *dest_offset += len;
+    }
+    return len;
+}
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
+
+#if defined(HAVE_COPY_FILE_RANGE)
+ssize_t
+mc_copy_file_range_native (int src_fd, off_t *src_offset, int dest_fd, off_t *dest_offset,
+                           size_t len)
+{
+    if (!vfs_copy_file_range_works ())
+        return -1;
+
+    return copy_file_range (src_fd, src_offset, dest_fd, dest_offset, len, COPY_FILE_RANGE_CLONE);
+}
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
+
 int
 vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 {
@@ -794,15 +841,9 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 
 #if defined(FICLONERANGE)
     {
-        int rc;
-        struct file_clone_range fcr = {
-            .src_fd = *(int *) src_fd,
-            .src_offset = in_offset,
-            .src_length = 0,
-            .dest_offset = out_offset,
-        };
+        int rc = mc_copy_file_range_ficlonerange (*(int *) src_fd, &in_offset, *(int *) dest_fd,
+                                                  &out_offset, SSIZE_MAX);
 
-        rc = ioctl (*(int *) dest_fd, FICLONERANGE, &fcr);
 #if defined(HAVE_COPY_FILE_RANGE)
         if (rc != -1)
 #endif
@@ -815,13 +856,10 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
     {
         ssize_t result;
 
-        if (!vfs_copy_file_range_works ())
-            return -1;
-
         do
         {
-            result = copy_file_range (*(int *) src_fd, &in_offset, *(int *) dest_fd, &out_offset,
-                                      SSIZE_MAX, COPY_FILE_RANGE_CLONE);
+            result = mc_copy_file_range_native (*(int *) src_fd, &in_offset, *(int *) dest_fd,
+                                                &out_offset, SSIZE_MAX);
         }
         while (result > 0);
         return result;
@@ -834,6 +872,14 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
     errno = ENOTSUP;
     return (-1);
 #endif
+}
+
+/* --------------------------------------------------------------------------------------------- */
+
+gboolean
+vfs_cloning_supported (vfs_path_t *src_vpath, vfs_path_t *dst_vpath)
+{
+    return vfs_file_is_local (src_vpath) && vfs_file_is_local (dst_vpath);
 }
 
 /* --------------------------------------------------------------------------------------------- */

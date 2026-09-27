@@ -2628,9 +2628,6 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
     else
         open_flags |= O_CREAT | O_TRUNC;
 
-#ifdef HAVE_FILE_CLONING_BY_RANGE
-open_dest:
-#endif
     while ((dest_desc = mc_open (dst_vpath, open_flags, src_mode)) < 0)
     {
         if (errno != EEXIST)
@@ -2658,24 +2655,23 @@ open_dest:
     ctx->do_append = FALSE;
 
 #ifdef HAVE_FILE_CLONING_BY_RANGE
-    // Try clone the file first, but not if the file is in O_APPEND mode
     if (mc_global.vfs.file_cloning && (open_flags & O_APPEND) == 0)
     {
-        if ((appending ? mc_lseek (dest_desc, 0, SEEK_END) >= 0 : TRUE)
-            && vfs_clone_file (dest_desc, src_desc) == 0)
+        // If we're appending but not in O_APPEND mode, seek first
+        while (appending && mc_lseek (dest_desc, 0, SEEK_END) < 0)
         {
-            dst_status = DEST_FULL;
-            return_status = FILE_CONT;
+            if (ctx->ignore_all)
+                return_status = FILE_IGNORE_ALL;
+            else
+            {
+                return_status =
+                    file_error (ctx, TRUE, _ ("Cannot seek in target file\n%s"), dst_path);
+                if (return_status == FILE_RETRY)
+                    continue;
+                if (return_status == FILE_IGNORE_ALL)
+                    ctx->ignore_all = TRUE;
+            }
             goto ret;
-        }
-        if (appending && (open_flags & O_APPEND) == 0)
-        {
-            // Cloning append has failed, resort to normal append
-            ctx->do_append = TRUE;
-            mc_close (dest_desc);
-            dst_status = DEST_NONE;
-            open_flags |= O_APPEND;
-            goto open_dest;
         }
     }
 #endif
@@ -2752,13 +2748,96 @@ open_dest:
         gint64 tv_last_update = ctx->transfer_start;
         gint64 tv_last_input = 0;
         gboolean is_first_time = TRUE;
+        size_t bufsize = 0;
 
-        const size_t bufsize = io_blksize (dst_stat);
-        buf = g_malloc (bufsize);
+#ifdef HAVE_FILE_CLONING_BY_RANGE
+        ssize_t n_copied = -1;
+        ssize_t (*copy_method) (int, off_t *, int, off_t *, size_t) = NULL;
+
+        off_t src_offset = ctx->do_reget;
+        off_t dst_offset = ctx->do_reget;
+        void *local_src_fd = NULL;
+        void *local_dst_fd = NULL;
+
+        // Try to clone the initial chunk to choose a working copy_method
+        while (mc_global.vfs.file_cloning && vfs_cloning_supported (src_vpath, dst_vpath))
+        {
+            bufsize = 1 << 20;
+            if ((off_t) bufsize > file_size - src_offset)
+                bufsize = SSIZE_MAX;  // don't try to read behind EOF
+            vfs_class_find_by_handle (src_desc, &local_src_fd);
+            vfs_class_find_by_handle (dest_desc, &local_dst_fd);
+#ifdef HAVE_FICLONERANGE
+            copy_method = mc_copy_file_range_ficlonerange;
+            n_copied = copy_method (*(int *) local_src_fd, &src_offset, *(int *) local_dst_fd,
+                                    &dst_offset, bufsize);
+            if (n_copied >= 0)
+                break;
+#endif
+#ifdef HAVE_COPY_FILE_RANGE
+            copy_method = mc_copy_file_range_native;
+            n_copied = copy_method (*(int *) local_src_fd, &src_offset, *(int *) local_dst_fd,
+                                    &dst_offset, bufsize);
+#endif
+            if (n_copied < 0)
+                copy_method = NULL;
+            break;
+        }
+
+        if (copy_method == NULL)  // cloning has failed, fallback to normal copy
+#endif
+        {
+            bufsize = io_blksize (dst_stat);
+            buf = g_malloc (bufsize);
+        }
 
         while (TRUE)
         {
             ssize_t n_read = -1;
+            gint64 tv_current;
+
+#ifdef HAVE_FILE_CLONING_BY_RANGE
+            if (copy_method != NULL)
+            {
+                off_t n_rest = file_size - src_offset;
+
+                if (n_rest == 0)
+                    break;
+
+                tv_current = g_get_monotonic_time ();
+
+                // Optimize bufsize until it hurts progress smoothness
+                if (tv_current - tv_last_input < FILEOP_UPDATE_INTERVAL_US >> 1
+                    && bufsize < SSIZE_MAX >> 1)
+                    bufsize <<= 1;
+
+                if ((off_t) bufsize > n_rest)
+                    bufsize = SSIZE_MAX;  // don't try to read behind EOF
+                n_copied = copy_method (*(int *) local_src_fd, &src_offset, *(int *) local_dst_fd,
+                                        &dst_offset, bufsize);
+                if (n_copied < 0)
+                {
+                    return_status = ctx->ignore_all
+                        ? FILE_IGNORE_ALL
+                        : files_error (ctx, TRUE, _ ("Cannot copy file data from\n%s\nto\n%s"),
+                                       src_path, dst_path);
+                    if (return_status == FILE_RETRY)
+                        continue;
+                    if (return_status == FILE_IGNORE_ALL)
+                        ctx->ignore_all = TRUE;
+                    goto ret;
+                }
+
+                if (n_copied == 0)
+                    break;
+
+                file_part = src_offset - ctx->do_reget;
+
+                tv_last_input = tv_current;
+
+                goto chunk_done;
+            }
+#endif
 
             // src_read
             if (mc_ctl (src_desc, VFS_CTL_IS_NOTREADY, 0) == 0)
@@ -2776,7 +2855,7 @@ open_dest:
             if (n_read == 0)
                 break;
 
-            const gint64 tv_current = g_get_monotonic_time ();
+            tv_current = g_get_monotonic_time ();
 
             if (n_read > 0)
             {
@@ -2824,6 +2903,9 @@ open_dest:
                 }
             }
 
+#ifdef HAVE_FILE_CLONING_BY_RANGE
+        chunk_done:
+#endif
             ctx->progress_bytes = file_part + ctx->do_reget;
 
             const gint64 usecs = tv_current - tv_last_update;
