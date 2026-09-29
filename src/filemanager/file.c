@@ -2295,6 +2295,9 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
     int open_flags;
     vfs_path_t *src_vpath = NULL, *dst_vpath = NULL;
     char *buf = NULL;
+#ifdef HAVE_FILE_CLONING_BY_RANGE
+    gboolean try_cloning = FALSE;
+#endif
 
     /* Keep the non-default value applied in chain of calls:
        move_file_file() -> file_progress_real_query_replace()
@@ -2614,15 +2617,19 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
     }
 #endif
 
+#ifdef HAVE_FILE_CLONING_BY_RANGE
+    try_cloning = mc_global.vfs.file_cloning && vfs_cloning_supported (src_vpath, dst_vpath);
+#endif
+
     open_flags = O_WRONLY;
     if (!dst_exists)
         open_flags |= O_CREAT | O_EXCL;
     else if (ctx->do_append)
 #ifdef HAVE_FILE_CLONING_BY_RANGE
-        // FICLONERANGE on Linux and copy_file_range(2) on FreeBSD support block-aligned ranges for
-        // cloning, but for not in O_APPEND mode. Use O_WRONLY + mc_lseek instead as we don't care
-        // about atomicity in our use cases.
-        open_flags |= mc_global.vfs.file_cloning ? 0 : O_APPEND;
+        // FICLONERANGE on Linux and copy_file_range(2) support block-aligned ranges for cloning,
+        // but not in O_APPEND mode. Use O_WRONLY + mc_lseek instead as we don't care about
+        // atomicity in our use cases. Non-local VFSes (ftpfs, shell) need O_APPEND to append.
+        open_flags |= try_cloning ? 0 : O_APPEND;
 #else
         open_flags |= O_APPEND;
 #endif
@@ -2656,7 +2663,7 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
     ctx->do_append = FALSE;
 
 #ifdef HAVE_FILE_CLONING_BY_RANGE
-    if (mc_global.vfs.file_cloning && (open_flags & O_APPEND) == 0)
+    if (try_cloning)
     {
         // If we're appending but not in O_APPEND mode, seek first
         while (appending && mc_lseek (dest_desc, 0, SEEK_END) < 0)
@@ -2756,13 +2763,14 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
         ssize_t (*copy_method) (int, off_t *, int, off_t *, size_t) = NULL;
 
         off_t src_offset = ctx->do_reget;
-        off_t dst_offset = ctx->do_reget;
+        // In append and reget modes, the destination fd was positioned at its end above
+        off_t dst_offset = appending ? dst_stat.st_size : 0;
 
         int local_src_fd = -1;
         int local_dst_fd = -1;
 
         // Try to clone the initial chunk to choose a working copy_method
-        while (mc_global.vfs.file_cloning && vfs_cloning_supported (src_vpath, dst_vpath))
+        if (try_cloning)
         {
             void *src_fsinfo = NULL;
             void *dst_fsinfo = NULL;
@@ -2782,16 +2790,16 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
 #ifdef HAVE_FICLONERANGE
             copy_method = mc_copy_file_range_ficlonerange;
             n_copied = copy_method (local_src_fd, &src_offset, local_dst_fd, &dst_offset, bufsize);
-            if (n_copied >= 0)
-                break;
 #endif
 #ifdef HAVE_COPY_FILE_RANGE
-            copy_method = mc_copy_file_range_native;
-            n_copied = copy_method (local_src_fd, &src_offset, local_dst_fd, &dst_offset, bufsize);
+            if (n_copied < 0)
+            {
+                copy_method = mc_copy_file_range_native;
+                n_copied = copy_method (local_src_fd, &src_offset, local_dst_fd, &dst_offset, bufsize);
+            }
 #endif
             if (n_copied < 0)
                 copy_method = NULL;
-            break;
         }
 
         if (copy_method == NULL)  // cloning has failed, fallback to normal copy

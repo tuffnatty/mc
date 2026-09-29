@@ -53,12 +53,14 @@
 
 #if defined(HAVE_COPY_FILE_RANGE)
 
-#define _FILE_OFFSET_BITS 64
 #include <unistd.h>  // copy_file_range(), COPY_FILE_RANGE_CLONE
 
 #if !defined(COPY_FILE_RANGE_CLONE)
 #define COPY_FILE_RANGE_CLONE 0  // shim for Linux
-#include <sys/utsname.h>         // uname()
+#endif
+
+#ifdef __linux__
+#include <sys/utsname.h>  // uname()
 #endif
 
 #elif defined(HAVE_SYS_CLONEFILE_H)
@@ -790,7 +792,10 @@ mc_copy_file_range_native (int src_fd, off_t *src_offset, int dest_fd, off_t *de
                            size_t len)
 {
     if (!vfs_copy_file_range_works ())
+    {
+        errno = ENOTSUP;
         return -1;
+    }
 
     return copy_file_range (src_fd, src_offset, dest_fd, dest_offset, len, COPY_FILE_RANGE_CLONE);
 }
@@ -840,16 +845,14 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
         return (-1);
 
 #if defined(FICLONERANGE)
-    {
-        int rc = mc_copy_file_range_ficlonerange (*(int *) src_fd, &in_offset, *(int *) dest_fd,
-                                                  &out_offset, SSIZE_MAX);
-
-#if defined(HAVE_COPY_FILE_RANGE)
-        if (rc != -1)
+    if (mc_copy_file_range_ficlonerange (*(int *) src_fd, &in_offset, *(int *) dest_fd, &out_offset,
+                                         SSIZE_MAX)
+        >= 0)
+        return 0;
+#if !defined(HAVE_COPY_FILE_RANGE)
+    return (-1);
 #endif
-            return rc;
-        /* Proceed with copy_file_range() */
-    }
+    // Proceed with copy_file_range()
 #endif
 
 #if defined(HAVE_COPY_FILE_RANGE)
@@ -877,7 +880,7 @@ vfs_clone_file (int dest_vfs_fd, int src_vfs_fd)
 /* --------------------------------------------------------------------------------------------- */
 
 gboolean
-vfs_cloning_supported (vfs_path_t *src_vpath, vfs_path_t *dst_vpath)
+vfs_cloning_supported (const vfs_path_t *src_vpath, const vfs_path_t *dst_vpath)
 {
     if (!vfs_file_is_local (src_vpath))
         return FALSE;
