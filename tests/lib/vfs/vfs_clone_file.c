@@ -53,6 +53,8 @@
 
 static int clone_syscall__call_count = 0;
 static gboolean clone_syscall__call_arguments_are_proper = FALSE;
+/* @ThenReturnValue */
+static int ioctl__ficlonerange__return_value = -1;
 
 static const char test_filename1[] = "mctestclone1.tst";
 static const char test_filename2[] = "mctestclone2.tst";
@@ -90,7 +92,7 @@ ioctl (int fd, int request, ...)
 
     clone_syscall__call_count++;
     clone_syscall__call_arguments_are_proper = (request == FICLONERANGE);
-    return -1;
+    return request == FICLONERANGE ? ioctl__ficlonerange__return_value : -1;
 }
 #endif
 
@@ -202,6 +204,40 @@ END_TEST
 
 /* --------------------------------------------------------------------------------------------- */
 
+#ifdef HAVE_FICLONERANGE
+/* @Test */
+START_TEST (test_vfs_clone_file_ficlonerange_success)
+{
+    vfs_path_t *vpath1;
+    vfs_path_t *vpath2;
+    int fdin;
+    int fdout;
+    int result;
+
+    // given
+    clone_syscall__call_count = 0;
+    ioctl__ficlonerange__return_value = 0;
+    prepare_files (&vpath1, &vpath2);
+    fdin = mc_open (vpath1, O_RDONLY | O_BINARY);
+    fdout = mc_open (vpath2, O_CREAT | O_WRONLY | O_TRUNC | O_BINARY, 0600);
+
+    // when
+    result = vfs_clone_file (fdout, fdin);
+
+    // then: a successful FICLONERANGE is a successful clone, whatever copy_file_range() would do
+    ck_assert_int_eq (result, 0);
+
+    // cleanup
+    ioctl__ficlonerange__return_value = -1;
+    mc_close (fdout);
+    mc_close (fdin);
+    cleanup_files (vpath1, vpath2);
+}
+END_TEST
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
+
 /* @Test */
 START_TEST (test_vfs_clone_file_by_path)
 {
@@ -242,6 +278,9 @@ main (void)
 
     // Add new tests here: ***************
     tcase_add_test (tc_core, test_vfs_clone_file);
+#ifdef HAVE_FICLONERANGE
+    tcase_add_test (tc_core, test_vfs_clone_file_ficlonerange_success);
+#endif
     tcase_add_test (tc_core, test_vfs_clone_file_by_path);
     // ***********************************
 
