@@ -2700,44 +2700,6 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
         goto ret;
     }
 
-    // try preallocate space; if fail, try copy anyway.
-    // Not in append and reget modes: posix_fallocate() extends the file, so the data would be
-    // appended after the preallocated area.
-    while (mc_global.vfs.preallocate_space && !appending
-           && vfs_preallocate (dest_desc, file_size, 0) != 0)
-    {
-        if (ctx->ignore_all)
-        {
-            // cannot allocate, start the file copying anyway
-            return_status = FILE_CONT;
-            break;
-        }
-
-        return_status =
-            file_error (ctx, TRUE, _ ("Cannot preallocate space for target file\n%s"), dst_path);
-
-        if (return_status == FILE_IGNORE_ALL)
-            ctx->ignore_all = TRUE;
-
-        if (ctx->ignore_all || return_status == FILE_IGNORE)
-        {
-            // skip the space allocation error, start file copying
-            return_status = FILE_CONT;
-            break;
-        }
-
-        if (return_status == FILE_ABORT)
-        {
-            mc_close (dest_desc);
-            dest_desc = -1;
-            mc_unlink (dst_vpath);
-            dst_status = DEST_NONE;
-            goto ret;
-        }
-
-        // return_status == FILE_RETRY -- try allocate space again
-    }
-
     ctx->eta_secs = 0.0;
     ctx->bps = 0;
 
@@ -2810,6 +2772,45 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
         {
             bufsize = io_blksize (dst_stat);
             buf = g_malloc (bufsize);
+
+            // In normal copy, we may want to preallocate.
+            // try preallocate space; if fail, try copy anyway.
+            // Not in append and reget modes: posix_fallocate() extends the file, so the data would
+            // be appended after the preallocated area.
+            while (mc_global.vfs.preallocate_space && !appending
+                   && vfs_preallocate (dest_desc, file_size, 0) != 0)
+            {
+                if (ctx->ignore_all)
+                {
+                    // cannot allocate, start the file copying anyway
+                    return_status = FILE_CONT;
+                    break;
+                }
+
+                return_status = file_error (
+                    ctx, TRUE, _ ("Cannot preallocate space for target file\n%s"), dst_path);
+
+                if (return_status == FILE_IGNORE_ALL)
+                    ctx->ignore_all = TRUE;
+
+                if (ctx->ignore_all || return_status == FILE_IGNORE)
+                {
+                    // skip the space allocation error, start file copying
+                    return_status = FILE_CONT;
+                    break;
+                }
+
+                if (return_status == FILE_ABORT)
+                {
+                    mc_close (dest_desc);
+                    dest_desc = -1;
+                    mc_unlink (dst_vpath);
+                    dst_status = DEST_NONE;
+                    goto ret;
+                }
+
+                // return_status == FILE_RETRY -- try allocate space again
+            }
         }
 
         while (TRUE)
