@@ -2797,7 +2797,8 @@ copy_file_file (file_op_context_t *ctx, const char *src_path, const char *dst_pa
             if (n_copied < 0)
             {
                 copy_method = mc_copy_file_range_native;
-                n_copied = copy_method (local_src_fd, &src_offset, local_dst_fd, &dst_offset, bufsize);
+                n_copied =
+                    copy_method (local_src_fd, &src_offset, local_dst_fd, &dst_offset, bufsize);
             }
 #endif
             if (n_copied < 0)
