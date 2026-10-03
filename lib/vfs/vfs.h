@@ -302,7 +302,6 @@ char *vfs_get_cwd (void);
 
 int vfs_preallocate (int dest_desc, off_t src_fsize, off_t dest_fsize);
 
-int vfs_clone_file (int dest_vfs_fd, int src_vfs_fd);
 int vfs_clone_file_by_path (const vfs_path_t *dest_vpath, const vfs_path_t *src_vpath,
                             gboolean preserve_uidgid);
 gboolean vfs_cloning_supported (const vfs_path_t *src_vpath, const vfs_path_t *dst_vpath);

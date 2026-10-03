@@ -30,16 +30,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 
-#ifdef HAVE_FICLONERANGE
-#include <linux/fs.h>   // FICLONERANGE
-#include <sys/ioctl.h>  // ioctl()
-#endif
-#if defined(HAVE_COPY_FILE_RANGE)
-#include <unistd.h>  // copy_file_range()
-#ifndef COPY_FILE_RANGE_CLONE
-#define COPY_FILE_RANGE_CLONE 0  // Linux shim
-#endif
-#elif defined(HAVE_REFLINK)
+#if defined(HAVE_REFLINK)
 #include <unistd.h>  // reflink()
 #elif defined(HAVE_SYS_CLONEFILE_H)
 #include <sys/clonefile.h>  // clonefile()
@@ -53,48 +44,9 @@
 
 static int clone_syscall__call_count = 0;
 static gboolean clone_syscall__call_arguments_are_proper = FALSE;
-/* @ThenReturnValue */
-static int ioctl__ficlonerange__return_value = -1;
 
 static const char test_filename1[] = "mctestclone1.tst";
 static const char test_filename2[] = "mctestclone2.tst";
-
-#ifdef HAVE_COPY_FILE_RANGE
-/* @Mock */
-ssize_t
-copy_file_range (int infd, off_t *inoffp, int outfd, off_t *outoffp, size_t len, unsigned int flags)
-{
-    (void) infd;
-    (void) inoffp;
-    (void) outfd;
-    (void) outoffp;
-    (void) len;
-
-    clone_syscall__call_count++;
-    clone_syscall__call_arguments_are_proper = (flags == COPY_FILE_RANGE_CLONE);
-
-    return -1;
-}
-#endif
-
-#ifdef HAVE_FICLONERANGE
-#ifdef __GLIBC__
-/* @Mock */
-int
-ioctl (int fd, unsigned long request, ...)
-#else  // POSIX, musl
-/* @Mock */
-int
-ioctl (int fd, int request, ...)
-#endif
-{
-    (void) fd;
-
-    clone_syscall__call_count++;
-    clone_syscall__call_arguments_are_proper = (request == FICLONERANGE);
-    return request == FICLONERANGE ? ioctl__ficlonerange__return_value : -1;
-}
-#endif
 
 #ifdef HAVE_SYS_CLONEFILE_H
 /* @Mock */
@@ -169,73 +121,6 @@ cleanup_files (vfs_path_t *vpath1, vfs_path_t *vpath2)
     unlink (test_filename2);
 }
 
-/* @Test */
-START_TEST (test_vfs_clone_file)
-{
-    vfs_path_t *vpath1;
-    vfs_path_t *vpath2;
-    int fdin;
-    int fdout;
-
-    // given
-    clone_syscall__call_count = 0;
-    clone_syscall__call_arguments_are_proper = FALSE;
-    prepare_files (&vpath1, &vpath2);
-    fdin = mc_open (vpath1, O_RDONLY | O_BINARY);
-    fdout = mc_open (vpath2, O_CREAT | O_WRONLY | O_TRUNC | O_BINARY, 0600);
-
-    // when
-    vfs_clone_file (fdout, fdin);
-
-    // then
-#ifdef HAVE_FILE_CLONING_BY_RANGE
-    ck_assert (clone_syscall__call_count > 0);
-    ck_assert (clone_syscall__call_arguments_are_proper);
-#else
-    ck_assert (errno == ENOTSUP);
-#endif
-
-    // cleanup
-    mc_close (fdout);
-    mc_close (fdin);
-    cleanup_files (vpath1, vpath2);
-}
-END_TEST
-
-/* --------------------------------------------------------------------------------------------- */
-
-#ifdef HAVE_FICLONERANGE
-/* @Test */
-START_TEST (test_vfs_clone_file_ficlonerange_success)
-{
-    vfs_path_t *vpath1;
-    vfs_path_t *vpath2;
-    int fdin;
-    int fdout;
-    int result;
-
-    // given
-    clone_syscall__call_count = 0;
-    ioctl__ficlonerange__return_value = 0;
-    prepare_files (&vpath1, &vpath2);
-    fdin = mc_open (vpath1, O_RDONLY | O_BINARY);
-    fdout = mc_open (vpath2, O_CREAT | O_WRONLY | O_TRUNC | O_BINARY, 0600);
-
-    // when
-    result = vfs_clone_file (fdout, fdin);
-
-    // then: a successful FICLONERANGE is a successful clone, whatever copy_file_range() would do
-    ck_assert_int_eq (result, 0);
-
-    // cleanup
-    ioctl__ficlonerange__return_value = -1;
-    mc_close (fdout);
-    mc_close (fdin);
-    cleanup_files (vpath1, vpath2);
-}
-END_TEST
-#endif
-
 /* --------------------------------------------------------------------------------------------- */
 
 /* @Test */
@@ -277,10 +162,6 @@ main (void)
     tcase_add_checked_fixture (tc_core, setup, teardown);
 
     // Add new tests here: ***************
-    tcase_add_test (tc_core, test_vfs_clone_file);
-#ifdef HAVE_FICLONERANGE
-    tcase_add_test (tc_core, test_vfs_clone_file_ficlonerange_success);
-#endif
     tcase_add_test (tc_core, test_vfs_clone_file_by_path);
     // ***********************************
 
